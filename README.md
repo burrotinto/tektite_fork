@@ -77,9 +77,12 @@ In dev mode on macOS, the host process may still appear as Electron.
 ```sh
 npm run package:mac
 npm run package:linux
+npm run package:win:msi
 ```
 
 The package scripts use the `electron-packager` CLI provided by `@electron/packager`. Install dependencies first with `npm install`.
+
+`npm run package:win:msi` builds the Windows `.msi` installer via `electron-wix-msi`. It must run on Windows with the WiX Toolset installed and produces `dist/Tektite-<version>-x64.msi`.
 
 ## Homebrew
 
