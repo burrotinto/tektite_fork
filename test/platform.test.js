@@ -72,3 +72,16 @@ test("sshExecutable: ssh auf Unix, OpenSSH-Pfad auf Windows", () => {
   assert.equal(platform.sshExecutable("linux"), "ssh");
   assert.ok(platform.sshExecutable("win32", { SystemRoot: "C:\\Windows" }).endsWith("ssh.exe"));
 });
+
+test("isTrustedWindowsExecutable: akzeptiert Systempfade, lehnt User-/Fremdpfade ab", () => {
+  const env = {
+    ProgramFiles: "C:\\Program Files",
+    "ProgramFiles(x86)": "C:\\Program Files (x86)",
+    SystemRoot: "C:\\Windows"
+  };
+  assert.equal(platform.isTrustedWindowsExecutable("C:\\Program Files\\Git\\cmd\\git.exe", env), true);
+  assert.equal(platform.isTrustedWindowsExecutable("C:\\Program Files (x86)\\Git\\cmd\\git.exe", env), true);
+  assert.equal(platform.isTrustedWindowsExecutable("C:\\Windows\\System32\\OpenSSH\\ssh.exe", env), true);
+  assert.equal(platform.isTrustedWindowsExecutable("C:\\Users\\x\\AppData\\Local\\git.exe", env), false);
+  assert.equal(platform.isTrustedWindowsExecutable("D:\\evil\\git.exe", env), false);
+});

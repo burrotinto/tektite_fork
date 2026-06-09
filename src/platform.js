@@ -1,3 +1,5 @@
+const path = require("node:path");
+
 const UNIX_GIT_CANDIDATES = [
   "/usr/bin/git",
   "/bin/git",
@@ -119,6 +121,26 @@ function sshExecutable(platform = process.platform, env = process.env) {
   return systemRoot + "\\System32\\OpenSSH\\ssh.exe";
 }
 
+/**
+ * Returns true when a Windows executable path lives under a trusted system
+ * location (Program Files, Program Files (x86), or the Windows directory).
+ * Used to validate git binaries resolved dynamically via "where git", so a
+ * binary planted in a user- or vault-controlled directory is never trusted.
+ *
+ * @param {string} candidate Absolute Windows path to an executable.
+ * @param {NodeJS.ProcessEnv} [env=process.env] Source environment.
+ * @returns {boolean} True if the path is under a trusted root.
+ */
+function isTrustedWindowsExecutable(candidate, env = process.env) {
+  const normalized = path.win32.normalize(String(candidate)).toLowerCase();
+  const roots = [
+    env.ProgramFiles || "C:\\Program Files",
+    env["ProgramFiles(x86)"] || "C:\\Program Files (x86)",
+    env.SystemRoot || "C:\\Windows"
+  ].map((root) => path.win32.normalize(root).toLowerCase());
+  return roots.some((root) => normalized.startsWith(root + "\\"));
+}
+
 module.exports = {
   isWindows,
   gitExecutableCandidates,
@@ -126,5 +148,6 @@ module.exports = {
   gitEnvironment,
   defaultShell,
   fallbackShell,
-  sshExecutable
+  sshExecutable,
+  isTrustedWindowsExecutable
 };

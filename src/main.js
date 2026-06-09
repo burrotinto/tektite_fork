@@ -1802,7 +1802,11 @@ async function resolveGitExecutable() {
 function gitFromWhere() {
   return new Promise((resolve) => {
     const { execFile } = require("node:child_process");
-    execFile("where", ["git"], (error, stdout) => {
+    const options = {
+      env: { PATH: platform.gitSafePath() },
+      cwd: process.env.SystemRoot || "C:\\Windows"
+    };
+    execFile("where", ["git"], options, (error, stdout) => {
       if (error) return resolve(null);
       const first = String(stdout)
         .split(/\r?\n/)
@@ -1820,8 +1824,9 @@ async function isSafeExecutable(candidate) {
 
     if (platform.isWindows()) {
       // On Windows the POSIX execute bit and the world-writable parent check do
-      // not apply; candidates are already restricted to trusted locations.
-      return true;
+      // not apply; instead require the binary to live under a trusted system
+      // location so a "where git" result cannot be shadowed by a planted binary.
+      return platform.isTrustedWindowsExecutable(candidate);
     }
 
     await fs.access(candidate, fs.constants.X_OK);
