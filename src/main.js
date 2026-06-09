@@ -3,6 +3,7 @@ const { spawn } = require("node:child_process");
 const fs = require("node:fs/promises");
 const fsSync = require("node:fs");
 const path = require("node:path");
+const platform = require("./platform");
 let pty; try { pty = require("node-pty"); } catch {}
 const ptySessions = new Map();
 
@@ -19,13 +20,6 @@ const tektiteWindows = new Set();
 const appIconPath = path.join(__dirname, "..", "assets", "app", "tektive-icon.webp");
 const fallbackAppIconPath = path.join(__dirname, "..", "assets", "icons", "tektite-icon.png");
 const imageExtensions = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".avif"]);
-const gitExecutableCandidates = [
-  "/usr/bin/git",
-  "/bin/git",
-  "/usr/local/bin/git",
-  "/opt/homebrew/bin/git"
-];
-const gitSafePath = "/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin";
 const splashMinimumMs = 3000;
 const recentVaultLimit = 10;
 
@@ -1711,12 +1705,15 @@ async function checkSshAuth(rootPath, send) {
   if (!hostMatch) return;
   const host = hostMatch[1];
 
+  const sshBin = platform.sshExecutable();
+  if (platform.isWindows() && !fsSync.existsSync(sshBin)) return;
+
   const { execFile } = require("node:child_process");
   await new Promise((resolve) => {
     execFile(
-      "ssh",
+      sshBin,
       ["-T", `git@${host}`, "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", "-o", "StrictHostKeyChecking=accept-new"],
-      { env: { PATH: gitSafePath, SSH_AUTH_SOCK: process.env.SSH_AUTH_SOCK || "" } },
+      { env: { PATH: platform.gitSafePath(), SSH_AUTH_SOCK: process.env.SSH_AUTH_SOCK || "" } },
       (error, _stdout, stderr) => {
         // exit code 1 with "successfully authenticated" is normal for GitHub/GitLab
         const output = (stderr || "").toLowerCase();
@@ -1792,18 +1789,42 @@ async function runGit(rootPath, args, send = () => {}, options = {}) {
 }
 
 async function resolveGitExecutable() {
-  for (const candidate of gitExecutableCandidates) {
+  for (const candidate of platform.gitExecutableCandidates()) {
     if (await isSafeExecutable(candidate)) return candidate;
   }
+  if (platform.isWindows()) {
+    const fromPath = await gitFromWhere();
+    if (fromPath && (await isSafeExecutable(fromPath))) return fromPath;
+  }
   throw new Error("Git executable was not found in a trusted system location.");
+}
+
+function gitFromWhere() {
+  return new Promise((resolve) => {
+    const { execFile } = require("node:child_process");
+    execFile("where", ["git"], (error, stdout) => {
+      if (error) return resolve(null);
+      const first = String(stdout)
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter(Boolean)[0];
+      resolve(first || null);
+    });
+  });
 }
 
 async function isSafeExecutable(candidate) {
   try {
     const stat = await fs.stat(candidate);
     if (!stat.isFile()) return false;
-    await fs.access(candidate, fs.constants.X_OK);
 
+    if (platform.isWindows()) {
+      // On Windows the POSIX execute bit and the world-writable parent check do
+      // not apply; candidates are already restricted to trusted locations.
+      return true;
+    }
+
+    await fs.access(candidate, fs.constants.X_OK);
     const parent = await fs.stat(path.dirname(candidate));
     return (parent.mode & 0o002) === 0;
   } catch {
@@ -1812,14 +1833,7 @@ async function isSafeExecutable(candidate) {
 }
 
 function gitEnvironment() {
-  return {
-    HOME: process.env.HOME || "",
-    LANG: process.env.LANG || "en_US.UTF-8",
-    LC_ALL: process.env.LC_ALL || "",
-    SSH_AUTH_SOCK: process.env.SSH_AUTH_SOCK || "",
-    GIT_TERMINAL_PROMPT: "0",
-    PATH: gitSafePath
-  };
+  return platform.gitEnvironment();
 }
 
 function formatGitCommandOutput(command, result, emptyOutput = "") {
@@ -1836,15 +1850,20 @@ function formatGitCommandOutput(command, result, emptyOutput = "") {
 
 ipcMain.handle("terminal:create", (event, cwd, cols, rows) => {
   if (!pty) return null;
-  const shell = process.env.SHELL || "/bin/sh";
   const safeCwd = cwd && fsSync.existsSync(cwd) ? cwd : app.getPath("home");
-  const ptyProc = pty.spawn(shell, [], {
+  const spawnOptions = {
     name: "xterm-256color",
     cols: cols || 80,
     rows: rows || 24,
     cwd: safeCwd,
     env: { ...process.env, TERM: "xterm-256color" }
-  });
+  };
+  let ptyProc;
+  try {
+    ptyProc = pty.spawn(platform.defaultShell(), [], spawnOptions);
+  } catch {
+    ptyProc = pty.spawn(platform.fallbackShell(), [], spawnOptions);
+  }
   const { pid } = ptyProc;
   ptySessions.set(pid, ptyProc);
   ptyProc.onData((data) => { event.sender.send(`terminal:data:${pid}`, data); });
