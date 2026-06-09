@@ -1,0 +1,91 @@
+name: Windows Build
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build Tektite for Windows
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Fix private registry URLs in lockfile
+        shell: bash
+        run: sed -i 's|https://repox.jfrog.io/artifactory/api/npm/npm/|https://registry.npmjs.org/|g' package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Syntax check
+        shell: bash
+        run: |
+          node --check src/main.js
+          node --check src/preload.js
+          node --check src/renderer/renderer.js
+          node --check src/platform.js
+          node --check scripts/start.js
+          node --check scripts/build-msi.js
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Install WiX Toolset
+        shell: pwsh
+        run: choco install wixtoolset --no-progress -y
+
+      - name: Build MSI
+        run: npm run package:win:msi
+
+      - name: Upload MSI artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Tektite-Windows
+          path: dist/*.msi
+
+      - name: Create tag and release on main push
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push' && github.actor != 'github-actions[bot]'
+        shell: bash
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          tag="v${version}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git rev-parse "${tag}" >/dev/null 2>&1; then
+            echo "Tag ${tag} already exists, skipping tag creation"
+          else
+            git tag "${tag}"
+            git push origin "${tag}"
+          fi
+          echo "RELEASE_TAG=${tag}" >> "$GITHUB_ENV"
+
+      - name: Publish GitHub release asset (main push)
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push' && github.actor != 'github-actions[bot]'
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: Tektite ${{ env.RELEASE_TAG }}
+          files: dist/*.msi
+
+      - name: Publish GitHub release asset (tag push)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65
+        with:
+          files: dist/*.msi
