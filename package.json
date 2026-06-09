@@ -8,6 +8,7 @@
     "postinstall": "node scripts/copy-vendor.js",
     "start": "node scripts/start.js",
     "dev": "electron .",
+    "test": "node --test",
     "package:mac": "electron-packager . Tektite --platform=darwin --icon=assets/icons/tektite-icon.icns --overwrite --no-asar",
     "package:linux": "electron-packager . Tektite --platform=linux --icon=assets/icons/tektite-icon.png --overwrite"
   },
